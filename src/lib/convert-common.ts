@@ -40,6 +40,8 @@ export interface ConvertResult {
   focusTotal: number
   /** Rows whose unit price was confirmed (Anthropic) or derived from a known quantity. */
   exactRows: number
+  /** Rows with a quantity and unit price, however the price was found. */
+  quantityRows: number
   providerPricedRows: number
   unpricedModels: string[]
   warnings: string[]
@@ -69,6 +71,11 @@ export function dec(n: number): string {
   if (/e/i.test(s)) s = n.toFixed(20).replace(/0+$/, '')
   return s.includes('.') ? (s.endsWith('.') ? s + '0' : s) : s + '.0'
 }
+
+// Float noise (0.30000000000000004) is cleaned from prices and dollar amounts:
+// unit prices to 12 significant digits, dollars to 10 decimal places.
+const cleanPrice = (n: number) => Number(n.toPrecision(12))
+const cleanUsd = (n: number) => Number(n.toFixed(10))
 
 const csvCell = (v: string | null) => (v === null ? '' : /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)
 
@@ -106,19 +113,25 @@ export interface Meter {
 /** One FOCUS 1.4 row (plus the caller's x_ columns) for a meter. */
 export function focusRow(m: Meter, account: Account, period: ReturnType<typeof periods>, extra: Record<string, string | null>): Record<string, string | null> {
   const priced = m.unitPrice !== null && m.pricingQty !== null
+  const unitPrice = priced ? cleanPrice(m.unitPrice!) : null
+  const pricingQty = priced ? Number(dec(m.pricingQty!)) : null
+  // ListCost stays the exact float product of the two columns as written: the
+  // validator checks ListUnitPrice x PricingQuantity = ListCost with exact equality.
+  const listCost = priced ? unitPrice! * pricingQty! : cleanUsd(m.listCost)
+  const billed = dec(cleanUsd(m.billed))
   return {
     BillingAccountId: account.id, BillingAccountName: account.name, BillingCurrency: 'USD',
     ...period,
     ChargeCategory: 'Usage', ChargeClass: null, ChargeDescription: m.description, ChargeFrequency: 'Usage-Based',
     InvoiceId: null, InvoiceIssuerName: m.provider, ServiceProviderName: m.provider, HostProviderName: m.provider,
     ServiceName: m.service, ServiceCategory: 'AI and Machine Learning', ServiceSubcategory: 'Generative AI',
-    SkuId: m.skuId, SkuPriceId: priced ? `${m.skuId}@${dec(m.unitPrice!)}` : null, SkuMeter: m.meter,
+    SkuId: m.skuId, SkuPriceId: priced ? `${m.skuId}@${dec(unitPrice!)}` : null, SkuMeter: m.meter,
     // Both describe a price, so both are null without one (SkuPriceDetails-C-004-C, PricingCategory-C-012-C).
     SkuPriceDetails: m.details && priced ? JSON.stringify(Object.fromEntries(Object.entries(m.details).sort())) : null,
     PricingCategory: priced ? 'Standard' : null,
-    PricingUnit: priced ? m.pricingUnit : null, PricingQuantity: priced ? dec(m.pricingQty!) : null,
-    ListUnitPrice: priced ? dec(m.unitPrice!) : null,
-    ListCost: dec(m.listCost), ContractedCost: dec(m.billed), BilledCost: dec(m.billed), EffectiveCost: dec(m.billed),
+    PricingUnit: priced ? m.pricingUnit : null, PricingQuantity: priced ? dec(pricingQty!) : null,
+    ListUnitPrice: priced ? dec(unitPrice!) : null,
+    ListCost: dec(listCost), ContractedCost: billed, BilledCost: billed, EffectiveCost: billed,
     ConsumedQuantity: m.consumed ? dec(m.consumed) : null, ConsumedUnit: m.consumed ? m.consumedUnit : null, Tags: null,
     ...extra,
   }

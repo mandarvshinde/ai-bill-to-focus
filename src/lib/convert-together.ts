@@ -79,6 +79,7 @@ export function convertTogether(text: string, account: Account): ConvertResult {
     providerTotal: total,
     focusTotal: total,
     exactRows: withQty,
+    quantityRows: withQty,
     providerPricedRows: withoutQty,
     unpricedModels: [],
     warnings,

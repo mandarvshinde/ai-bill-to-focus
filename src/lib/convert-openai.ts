@@ -173,6 +173,7 @@ export function convertOpenAI(costText: string, usageText: string | null, prices
     providerTotal,
     focusTotal: providerTotal,
     exactRows: withQty,
+    quantityRows: withQty,
     providerPricedRows: withoutQty,
     unpricedModels: [],
     warnings: [...new Set(warnings)],

@@ -8,6 +8,25 @@ npx ai-bill-to-focus convert cost.csv usage.csv -o focus.csv --check
 
 The same converter and checker run in the browser at [cognocient.com/tools/focus-checker](https://www.cognocient.com/tools/focus-checker).
 
+```
+Anthropic -> FOCUS 1.4: 5 rows written to focus.csv
+  provider total $0.82, FOCUS BilledCost total $0.82
+  4 rows with quantities and unit prices (4 at Anthropic's public prices, 0 from its rounded cents), 1 with the provider's dollars only, 0 zero rows skipped
+
+focus.csv (FOCUS 1.4): 5 rows, 40 columns, checked against FOCUS 1.4 (1.4.0.1)
+0 errors, 0 warnings; 119 rules passed, 111 not applicable, 168 of 398 not checked here (need the full validator)
+```
+
+A few of the columns it writes, one row per day, model and token type:
+
+| SkuMeter | ConsumedQuantity | ListUnitPrice ($/1M) | BilledCost |
+|---|---|---|---|
+| Input Tokens | 100000 | 3.00 | 0.30 |
+| Cache Write Input Tokens (5 min) | 40000 | 3.75 | 0.15 |
+| Cache Read Input Tokens | 200000 | 0.30 | 0.06 |
+| Output Tokens | 20000 | 15.00 | 0.30 |
+| Web Search | | | 0.01 |
+
 ## Supported exports
 
 | Provider | Files | Status |
@@ -26,6 +45,7 @@ The provider and each file's role are detected from the header rows, so the orde
 - `BilledCost` is always the provider's own dollar figure.
   - **Anthropic:** with both exports, a token row is priced as tokens × Anthropic's public price (cache writes 1.25× or 2× input). The row keeps that exact figure only when it rounds to the Cost export's cents; otherwise it keeps the provider's rounded dollars. `x_PriceSource` says which.
   - **OpenAI:** `input_tokens` already includes cached tokens, so uncached input is `input_tokens - input_cached_tokens`. Token counts fill `ConsumedQuantity` and derive the unit price, but never change a dollar amount. If a joined count implies a price more than 3× away from OpenAI's public price, the count is dropped.
+- Unit prices are written to 12 significant digits and dollar amounts to 10 decimal places, so there is no floating-point noise. The one exception is `ListCost`: it is the exact floating-point product of `ListUnitPrice` and `PricingQuantity` (for example `0.30000000000000004` for 3.0 × 0.1), because the FOCUS validator checks that product with exact equality.
 - Provider details that FOCUS has no column for are kept as `x_` columns: workspace, API key, project, line item and so on. `Tags` is a single JSON column, as the spec requires.
 - `BillingAccountId` and `BillingAccountName` come from the file when it has them; otherwise set them with `--account-id` and `--account-name`.
 
@@ -47,7 +67,7 @@ Exit codes are `0` for OK, `1` for FOCUS errors or a failed conversion, and `2` 
 
 ## Network use
 
-`convert` for Anthropic and OpenAI downloads the public model price list from `https://api.cognocient.com/api/estimate/models`. The request carries nothing about your files. Use `--offline` to skip it, or `--prices file.json` to provide your own list in the same format. `check`, `detect` and the Together AI converter make no network requests.
+`convert` for Anthropic and OpenAI downloads the public model price list from `https://api.cognocient.com/api/estimate/models`. The request carries nothing about your files. Use `--offline` to skip it (Anthropic token rows then get unit prices worked out from Anthropic's rounded cents instead of its public prices), or `--prices file.json` to provide your own list in the same format. `check`, `detect` and the Together AI converter make no network requests.
 
 ## Development
 

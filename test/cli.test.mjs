@@ -28,7 +28,7 @@ test('anthropic: every token row priced exactly and passes the checker', () => {
   const file = join(out, 'anthropic.csv')
   const r = run('convert', fx('anthropic-cost.csv'), fx('anthropic-usage.csv'), '--prices', fx('prices.json'), '-o', file, '--check')
   assert.equal(r.status, 0, r.stderr + r.stdout)
-  assert.match(r.stderr, /4 rows with quantities and unit prices, 1 with the provider's dollars only/)
+  assert.match(r.stderr, /4 rows with quantities and unit prices \(4 at Anthropic's public prices, 0 from its rounded cents\), 1 with the provider's dollars only/)
   assert.match(r.stdout, /0 errors, 0 warnings/)
   const { header, rows } = parse(readFileSync(file, 'utf8'))
   assert.equal(rows.length, 5)
@@ -36,6 +36,19 @@ test('anthropic: every token row priced exactly and passes the checker', () => {
   assert.equal(rows.filter((r) => r.includes(',public-price,')).length, 4)
   // 40k cache-write tokens at 1.25 x $3 / 1M
   assert.ok(rows.some((r) => r.includes('anthropic/claude-sonnet-4-6/cache-write-5m@3.75')))
+})
+
+test('anthropic --offline: unit prices from the rounded cents, no float noise', () => {
+  const file = join(out, 'anthropic-offline.csv')
+  const r = run('convert', fx('anthropic-cost.csv'), fx('anthropic-usage.csv'), '--offline', '-o', file, '--check')
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+  assert.match(r.stderr, /4 rows with quantities and unit prices \(0 at Anthropic's public prices, 4 from its rounded cents: no price list\)/)
+  assert.match(r.stdout, /0 errors, 0 warnings/)
+  const csv = readFileSync(file, 'utf8')
+  // 0.3 / 0.1 is 2.9999999999999996 in floating point; the unit price and dollars are written clean.
+  // ListCost stays the exact product 3.0 x 0.1, which the validator checks with exact equality.
+  assert.ok(csv.includes('anthropic/claude-sonnet-4-6/input@3.0,'), csv)
+  assert.ok(csv.includes(',0.1,3.0,0.30000000000000004,0.3,0.3,0.3,'), csv)
 })
 
 test('openai: dollars from amount_value, uncached input = input - cached', () => {

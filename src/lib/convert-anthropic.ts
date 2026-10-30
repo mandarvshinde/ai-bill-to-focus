@@ -80,7 +80,7 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
   }
 
   const out: Record<string, string | null>[] = []
-  let skipped = 0, providerTotal = 0, focusTotal = 0, exact = 0, providerPriced = 0
+  let skipped = 0, providerTotal = 0, focusTotal = 0, exact = 0, derived = 0, providerPriced = 0
   const unpriced = new Set<string>()
 
   for (const { r, cost: costUsd, list } of groups.values()) {
@@ -133,6 +133,7 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
       billed = costUsd
       source = 'provider-rounded'
       providerPriced++
+      derived++
     } else {
       listCost = listUsd
       billed = costUsd
@@ -165,6 +166,7 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
     providerTotal,
     focusTotal,
     exactRows: exact,
+    quantityRows: exact + derived,
     providerPricedRows: providerPriced,
     unpricedModels: [...unpriced],
     warnings,

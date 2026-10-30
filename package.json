@@ -1,6 +1,6 @@
 {
   "name": "ai-bill-to-focus",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Convert AI provider bills (Anthropic, OpenAI, Together AI) to FinOps FOCUS 1.4 CSV, and check any CSV against the FOCUS 1.2-1.4 rules. Runs locally; your files never leave your machine.",
   "keywords": [
     "focus",

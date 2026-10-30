@@ -113,7 +113,11 @@ async function convert(files: string[], opts: Record<string, string | boolean | 
 
   err(`${LABEL[p]} -> FOCUS 1.4: ${result.rows} rows${opts.output ? ` written to ${opts.output}` : ''}${UNVERIFIED[p] ? ` (converter ${UNVERIFIED[p]})` : ''}`)
   err(`  provider total ${usd(result.providerTotal)}, FOCUS BilledCost total ${usd(result.focusTotal)}`)
-  err(`  ${result.exactRows} rows with quantities and unit prices, ${result.providerPricedRows} with the provider's dollars only, ${result.skippedZeroRows} zero rows skipped`)
+  // Anthropic rows are priced at its public rates when they reconcile, otherwise from its rounded cents.
+  const how = p === 'anthropic'
+    ? ` (${result.exactRows} at Anthropic's public prices, ${result.quantityRows - result.exactRows} from its rounded cents${prices ? '' : ': no price list'})`
+    : result.quantityRows ? " (unit prices from the provider's dollars)" : ''
+  err(`  ${result.quantityRows} rows with quantities and unit prices${how}, ${result.rows - result.quantityRows} with the provider's dollars only, ${result.skippedZeroRows} zero rows skipped`)
   for (const w of result.warnings) err(`  note: ${w}`)
 
   if (opts.check) {
