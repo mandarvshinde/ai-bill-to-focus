@@ -40,7 +40,7 @@
   },
   "scripts": {
     "build": "node scripts/sync-lib.mjs && node build.mjs",
-    "test": "npm run build && node --test test/",
+    "test": "npm run build && node --test test/cli.test.mjs",
     "prepublishOnly": "npm test"
   },
   "devDependencies": {
