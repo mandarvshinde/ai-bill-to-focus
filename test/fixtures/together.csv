@@ -1,0 +1,4 @@
+Date,Line Item,Dimensions,Quantity,Unit Price (USD),Amount (USD)
+2026-10-01,meta-llama/Llama-3.3-70B-Instruct-Turbo,input tokens,1.5,0.88,1.32
+2026-10-01,meta-llama/Llama-3.3-70B-Instruct-Turbo,output tokens,0.5,0.88,0.44
+2026-10-02,Fine-tuning,,0,0,0

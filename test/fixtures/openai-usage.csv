@@ -1,0 +1,2 @@
+start_time,end_time,start_time_iso,end_time_iso,input_tokens,output_tokens,input_cached_tokens,input_audio_tokens,output_audio_tokens,num_model_requests,project_id,user_id,api_key_id,model,batch
+1790812800,1790899200,2026-10-01T00:00:00+00:00,2026-10-02T00:00:00+00:00,120000,30000,20000,0,0,140,proj_abc,,,gpt-4o-2024-08-06,False

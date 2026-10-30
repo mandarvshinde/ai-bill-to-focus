@@ -1,0 +1,6 @@
+usage_date_utc,model,workspace,api_key,usage_type,context_window,token_type,cost_usd,list_price_usd,cost_type,inference_geo,speed,api_key_id,api_key_status
+2026-10-01,Claude Sonnet 4.6,Default,example-key,message,≤ 200k,input_no_cache,0.30,0.30,token,--,--,apikey_01Example,active
+2026-10-01,Claude Sonnet 4.6,Default,example-key,message,≤ 200k,input_cache_write_5m,0.15,0.15,token,--,--,apikey_01Example,active
+2026-10-01,Claude Sonnet 4.6,Default,example-key,message,≤ 200k,input_cache_read,0.06,0.06,token,--,--,apikey_01Example,active
+2026-10-01,Claude Sonnet 4.6,Default,example-key,message,≤ 200k,output,0.30,0.30,token,--,--,apikey_01Example,active
+2026-10-01,--,Default,example-key,--,--,--,0.01,0.01,web_search,--,--,apikey_01Example,active

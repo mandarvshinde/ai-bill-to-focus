@@ -1,0 +1,49 @@
+{
+  "name": "ai-bill-to-focus",
+  "version": "0.1.0",
+  "description": "Convert AI provider bills (Anthropic, OpenAI, Together AI) to FinOps FOCUS 1.4 CSV, and check any CSV against the FOCUS 1.2-1.4 rules. Runs locally; your files never leave your machine.",
+  "keywords": [
+    "focus",
+    "finops",
+    "finops-focus",
+    "ai-costs",
+    "llm-costs",
+    "anthropic",
+    "openai",
+    "together-ai",
+    "cost",
+    "billing",
+    "csv"
+  ],
+  "homepage": "https://www.cognocient.com/tools/focus-checker",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mandarvshinde/ai-bill-to-focus.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mandarvshinde/ai-bill-to-focus/issues"
+  },
+  "license": "MIT",
+  "author": "Cognocient",
+  "type": "module",
+  "bin": {
+    "ai-bill-to-focus": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=18.3"
+  },
+  "scripts": {
+    "build": "node scripts/sync-lib.mjs && node build.mjs",
+    "test": "npm run build && node --test test/",
+    "prepublishOnly": "npm test"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  }
+}

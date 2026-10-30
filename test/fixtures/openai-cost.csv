@@ -1,0 +1,6 @@
+start_time,end_time,start_time_iso,end_time_iso,amount_value,amount_currency,line_item,project_id,organization_id,project_name,organization_name
+1790812800,1790899200,2026-10-01T00:00:00+00:00,2026-10-02T00:00:00+00:00,0.25,usd,"gpt-4o-2024-08-06, input",proj_abc,org_123,Search,Example Org
+1790812800,1790899200,2026-10-01T00:00:00+00:00,2026-10-02T00:00:00+00:00,0.025,usd,"gpt-4o-2024-08-06, cached input",proj_abc,org_123,Search,Example Org
+1790812800,1790899200,2026-10-01T00:00:00+00:00,2026-10-02T00:00:00+00:00,0.3,usd,"gpt-4o-2024-08-06, output",proj_abc,org_123,Search,Example Org
+1790812800,1790899200,2026-10-01T00:00:00+00:00,2026-10-02T00:00:00+00:00,0.05,usd,web search tool calls,proj_abc,org_123,Search,Example Org
+1790899200,1790985600,2026-10-02T00:00:00+00:00,2026-10-03T00:00:00+00:00,0.0,usd,"gpt-4o-mini-2024-07-18, input",proj_abc,org_123,Search,Example Org

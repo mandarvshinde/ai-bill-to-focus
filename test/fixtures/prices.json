@@ -1,0 +1,5 @@
+{"models":[
+ {"model":"claude-sonnet-4-6","input_per_1m":3,"output_per_1m":15,"cache_read_per_1m":0.3},
+ {"model":"gpt-4o","input_per_1m":2.5,"output_per_1m":10,"cache_read_per_1m":1.25},
+ {"model":"gpt-4o-mini","input_per_1m":0.15,"output_per_1m":0.6,"cache_read_per_1m":0.075}
+]}
