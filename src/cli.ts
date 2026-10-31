@@ -2,8 +2,8 @@
 // on the command line. The checker and converters are the same code the web
 // tool at cognocient.com/tools/focus-checker runs in the browser.
 
-import { readFileSync, writeFileSync } from 'node:fs'
-import { basename } from 'node:path'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { AI_CRITERIA, checkFocus, criteriaFor, VERSIONS, type ConverterId, type FocusVersion, type Report } from './lib/engine'
 import { fetchPrices, parsePrices, type Account, type ConvertResult, type PriceTable } from './lib/convert-common'
@@ -71,9 +71,39 @@ https://www.cognocient.com/tools/focus-checker
 `
 
 class UsageError extends Error {}
+/** A file that couldn't be read: the message says what to do, so no --help hint. */
+class FileError extends UsageError {}
+
+// The names in the README and help examples, which people run as written.
+const EXAMPLE_NAMES = ['cost.csv', 'usage.csv', 'bill.csv', 'export.csv', 'focus.csv', 'file.csv']
+
+/** Provider exports in a folder, found by header row. Other CSVs aren't named: the error may get pasted. */
+function exportsIn(dir: string): string[] {
+  let names: string[] = []
+  try { names = readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.csv')).slice(0, 200) } catch { return [] }
+  return names.filter((f) => {
+    try {
+      const kind = detectExport(readFileSync(join(dir, f), 'utf8').slice(0, 8192))
+      return !!kind && kind !== 'openai-empty'
+    } catch { return false }
+  })
+}
 
 const read = (file: string) => {
-  try { return readFileSync(file, 'utf8') } catch (e) { throw new UsageError(`Can't read ${file}: ${(e as Error).message}`) }
+  try { return readFileSync(file, 'utf8') } catch (e) {
+    const code = (e as { code?: string }).code
+    if (code === 'EISDIR') throw new FileError(`${file} is a folder. Give the path to a CSV file in it.`)
+    if (code !== 'ENOENT') throw new FileError(`Can't read ${file}: ${(e as Error).message}`)
+    const lines = [`File not found: ${file} (looked in ${resolve(dirname(file))}).`]
+    if (EXAMPLE_NAMES.includes(basename(file).toLowerCase())) {
+      lines.push(`  "${basename(file)}" in the examples stands for your own export, such as claude_api_cost_2026_10_01_to_2026_10_30.csv`)
+      lines.push('  from platform.claude.com/cost, or the cost CSV from OpenAI\'s Usage page.')
+    }
+    const found = exportsIn(dirname(file))
+    if (found.length) lines.push(`  Provider exports in that folder: ${found.slice(0, 6).join(', ')}${found.length > 6 ? `, and ${found.length - 6} more` : ''}`)
+    lines.push('  Give the full path to the file, in quotes if it contains spaces.')
+    throw new FileError(lines.join('\n'))
+  }
 }
 const err = (s = '') => process.stderr.write(s + '\n')
 const usd = (n: number) => `$${n.toFixed(n !== 0 && Math.abs(n) < 0.01 ? 6 : 2)}`
@@ -272,7 +302,7 @@ main(process.argv.slice(2)).then(
   (e) => {
     const usage = e instanceof UsageError || (e as { code?: string }).code?.startsWith('ERR_PARSE_ARGS')
     err(`error: ${(e as Error).message}`)
-    if (usage) err('Run "ai-bill-to-focus --help" for usage.')
+    if (usage && !(e instanceof FileError)) err('Run "ai-bill-to-focus --help" for usage.')
     process.exitCode = usage ? 2 : 1
   },
 )

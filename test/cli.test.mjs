@@ -125,6 +125,18 @@ test('report: describes the files without dollars, names or fine-tune owners', (
   assert.ok(!u.stdout.includes('acme'), u.stdout)
 })
 
+test('a missing file explains the example names and lists only provider exports nearby', () => {
+  writeFileSync(join(out, 'api-keys.csv'), 'name,key\nprod,sk-secret\n')
+  writeFileSync(join(out, 'my-anthropic-cost.csv'), readFileSync(fx('anthropic-cost.csv'), 'utf8'))
+  const r = run('report', join(out, 'cost.csv'))
+  assert.equal(r.status, 2)
+  assert.match(r.stderr, /File not found: .*cost\.csv/)
+  assert.match(r.stderr, /"cost\.csv" in the examples stands for your own export/)
+  assert.match(r.stderr, /Provider exports in that folder: .*my-anthropic-cost\.csv/)
+  assert.ok(!r.stderr.includes('api-keys'), r.stderr)
+  assert.doesNotMatch(r.stderr, /--help/)
+})
+
 test('together: amount kept, unit neutral', () => {
   const r = run('convert', fx('together.csv'), '--check')
   assert.equal(r.status, 0, r.stderr)
