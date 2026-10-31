@@ -6,6 +6,8 @@ Turn AI provider bills into [FinOps FOCUS](https://focus.finops.org) 1.4 CSV, an
 npx ai-bill-to-focus convert cost.csv usage.csv -o focus.csv --check
 ```
 
+`cost.csv` and `usage.csv` stand for your own exports: use their real names or full paths, for example `"C:\Users\you\Downloads\claude_api_cost_2026_10_01_to_2026_10_30.csv"` (in quotes if the path has spaces).
+
 The same converter and checker run in the browser at [cognocient.com/tools/focus-checker](https://www.cognocient.com/tools/focus-checker).
 
 ```
@@ -42,7 +44,13 @@ The provider and each file's role are detected from the header rows, so the orde
 ## Reporting a problem without sharing your bill
 
 ```sh
-npx ai-bill-to-focus report cost.csv usage.csv
+npx ai-bill-to-focus report <your-cost-export.csv> <your-usage-export.csv>
+```
+
+Give the paths to your own provider exports, the same files you would pass to `convert`. For example, from the folder they were downloaded to:
+
+```sh
+npx ai-bill-to-focus report claude_api_cost_2026_10_01_to_2026_10_30.csv claude_api_tokens_2026_10_01_to_2026_10_30.csv
 ```
 
 `report` converts in memory and prints a summary that is safe to paste into a public issue: each file's column names, row count and date range, the public model names, how each line item was read, the reconciliation gap as a percentage, and the FOCUS check counts. It contains no dollar amounts and no account, project, workspace or API key names; fine-tuned model names are cut to their base model, and file names are replaced by "file 1", "file 2". Read it before you paste it. The web tool has the same report behind **Copy a report to share**.
