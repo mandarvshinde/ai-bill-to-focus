@@ -1,0 +1,6 @@
+start_time,end_time,start_time_iso,end_time_iso,amount_value,amount_currency,line_item,project_id,organization_id,project_name,organization_name
+1790812800,1790899200,2026-10-01T00:00:00+00:00,2026-10-02T00:00:00+00:00,0.25,usd,"gpt-4o-2024-08-06, input",proj_abc,org_123,Secret Project,Acme Corp
+1790812800,1790899200,2026-10-01T00:00:00+00:00,2026-10-02T00:00:00+00:00,0.5,usd,"gpt-4o-2024-08-06, input (batch)",proj_abc,org_123,Secret Project,Acme Corp
+1790812800,1790899200,2026-10-01T00:00:00+00:00,2026-10-02T00:00:00+00:00,0.3,usd,"gpt-4o-2024-08-06, output",proj_abc,org_123,Secret Project,Acme Corp
+1790812800,1790899200,2026-10-01T00:00:00+00:00,2026-10-02T00:00:00+00:00,0.5,usd,"gpt-4o-2024-08-06, output (batch)",proj_abc,org_123,Secret Project,Acme Corp
+1790812800,1790899200,2026-10-01T00:00:00+00:00,2026-10-02T00:00:00+00:00,0.06,usd,"ft:gpt-4o-mini-2024-07-18:acme-corp:support:AbC123, input",proj_abc,org_123,Secret Project,Acme Corp

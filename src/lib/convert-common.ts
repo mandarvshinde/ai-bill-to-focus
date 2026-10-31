@@ -44,7 +44,37 @@ export interface ConvertResult {
   quantityRows: number
   providerPricedRows: number
   unpricedModels: string[]
+  /** Rows left out because a dollar or token cell wasn't a number: usually a changed export format. */
+  unreadableRows: number
+  /** Export columns the converter doesn't read, by file role. */
+  unreadColumns: Partial<Record<'cost' | 'usage', string[]>>
   warnings: string[]
+}
+
+/** A dollar or token cell as a number: null when empty, NaN when it isn't a number. */
+export function numeric(v: string | null): number | null {
+  if (v === null) return null
+  const t = v.replace(/[$,\s]/g, '')
+  return t === '' || !/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(t) ? NaN : Number(t)
+}
+
+/**
+ * Columns in an export that the converter neither reads nor knows to be safe
+ * to ignore. A provider adding or renaming a column shows up here instead of
+ * silently changing quantities or totals.
+ */
+export function unreadColumns(header: string[], known: readonly string[]): string[] {
+  return header.filter((h) => h && !known.includes(h))
+}
+
+export function unreadWarning(file: string, cols: string[]): string | null {
+  if (!cols.length) return null
+  const list = cols.slice(0, 8).join(', ') + (cols.length > 8 ? `, and ${cols.length - 8} more` : '')
+  return `The ${file} has column${cols.length === 1 ? '' : 's'} this converter doesn't read: ${list}. The export format may have changed; if ${cols.length === 1 ? 'it holds' : 'any holds'} tokens or dollars, quantities could be off. Please report the column names (ai-bill-to-focus report prints them).`
+}
+
+export function unreadableWarning(n: number, example: string): string | null {
+  return n ? `${n} row${n === 1 ? ' was' : 's were'} left out because a dollar or token cell wasn't a number (for example ${JSON.stringify(example)}). The columns may have shifted; totals don't include ${n === 1 ? 'it' : 'them'}.` : null
 }
 
 export interface Account { id: string; name: string }

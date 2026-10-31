@@ -11,6 +11,7 @@ import { convertAnthropic } from './lib/convert-anthropic'
 import { convertOpenAI } from './lib/convert-openai'
 import { convertTogether } from './lib/convert-together'
 import { detectExport } from './lib/detect'
+import { shareableReport } from './lib/report'
 
 declare const __VERSION__: string
 
@@ -33,6 +34,7 @@ Usage
   ai-bill-to-focus convert <export.csv>... [options]
   ai-bill-to-focus check <file.csv> [options]
   ai-bill-to-focus detect <file.csv>...
+  ai-bill-to-focus report <export.csv>... [convert options]
 
 convert
   Give the provider's cost export, plus its usage export for token quantities.
@@ -49,6 +51,12 @@ convert
                            the export's rounded dollars; OpenAI skips its price sanity check)
       --check              Check the output against FOCUS 1.4 afterwards
 
+report
+  Converts in memory and prints a report that is safe to paste into a public
+  issue: column names, row counts, dates, public model names, how each line
+  item was read, the reconciliation gap as a percentage and the FOCUS check
+  counts. No dollar amounts, account, project, workspace or key names.
+
 check
   -v, --focus-version <v>  1.4 (default), 1.3 or 1.2
   -c, --criteria <list>    Applicability criteria: "ai" (default), "all", "none",
@@ -57,7 +65,8 @@ check
       --json               Print the full report as JSON
       --strict             Exit non-zero on warnings too
 
-Exit codes: 0 ok, 1 FOCUS errors found (or conversion failed), 2 bad usage.
+Exit codes: 0 ok, 1 FOCUS errors found (or conversion failed, or rows were
+unreadable), 2 bad usage.
 https://www.cognocient.com/tools/focus-checker
 `
 
@@ -80,8 +89,11 @@ async function loadPrices(file: string | undefined, offline: boolean): Promise<P
   }
 }
 
-async function convert(files: string[], opts: Record<string, string | boolean | undefined>): Promise<number> {
-  if (!files.length) throw new UsageError('convert needs at least one export file.')
+type Opts = Record<string, string | boolean | undefined>
+
+/** Detect each file's provider and role, then convert them in memory. */
+async function runConversion(files: string[], opts: Opts, command = 'convert') {
+  if (!files.length) throw new UsageError(`${command} needs at least one export file.`)
   const slots: Partial<Record<'cost' | 'usage', { file: string; text: string }>> = {}
   let provider: ConverterId | null = null
   for (const file of files) {
@@ -107,7 +119,11 @@ async function convert(files: string[], opts: Record<string, string | boolean | 
     p === 'anthropic' ? convertAnthropic(slots.cost.text, usage, prices, account)
       : p === 'openai' ? convertOpenAI(slots.cost.text, usage, prices, account)
         : convertTogether(slots.cost.text, account)
+  return { p, prices, result, inputs: [slots.cost, ...(slots.usage ? [slots.usage] : [])] }
+}
 
+async function convert(files: string[], opts: Opts): Promise<number> {
+  const { p, prices, result } = await runConversion(files, opts)
   if (opts.output) writeFileSync(opts.output as string, result.csv)
   else process.stdout.write(result.csv)
 
@@ -119,13 +135,32 @@ async function convert(files: string[], opts: Record<string, string | boolean | 
     : result.quantityRows ? " (unit prices from the provider's dollars)" : ''
   err(`  ${result.quantityRows} rows with quantities and unit prices${how}, ${result.rows - result.quantityRows} with the provider's dollars only, ${result.skippedZeroRows} zero rows skipped`)
   for (const w of result.warnings) err(`  note: ${w}`)
+  if (UNVERIFIED[p] || result.warnings.length) err(`  To report a problem without sharing the file: ai-bill-to-focus report ${files.map((f) => basename(f)).join(' ')}`)
 
+  let code = result.unreadableRows ? 1 : 0
   if (opts.check) {
     err()
     const report = checkFocus(result.csv, '1.4', AI_CRITERIA)
-    return printReport(report, `${opts.output ?? 'output'} (FOCUS 1.4)`, false)
+    code = Math.max(code, printReport(report, `${opts.output ?? 'output'} (FOCUS 1.4)`, false))
   }
-  return 0
+  return code
+}
+
+async function report(files: string[], opts: Opts): Promise<number> {
+  const tool = `ai-bill-to-focus ${__VERSION__}`
+  const all = files.map((file) => ({ name: file, text: read(file) }))
+  try {
+    const { result } = await runConversion(files, opts, 'report')
+    process.stdout.write(shareableReport({ tool, files: all, result, check: checkFocus(result.csv, '1.4', AI_CRITERIA) }))
+    return result.unreadableRows ? 1 : 0
+  } catch (e) {
+    if (!(e instanceof UsageError) || !all.length) throw e
+    // Still describe the files, so an unrecognised export can be reported too.
+    // File names can name a customer: refer to them by position.
+    const error = all.reduce((m, f, i) => m.split(f.name).join(`file ${i + 1}`).split(basename(f.name)).join(`file ${i + 1}`), e.message)
+    process.stdout.write(shareableReport({ tool, files: all, error }))
+    return 1
+  }
 }
 
 function criteriaList(spec: string | undefined, version: FocusVersion): string[] {
@@ -170,7 +205,7 @@ function printReport(r: Report, name: string, strict: boolean): number {
   return errors > 0 || (strict && warnings > 0) ? 1 : 0
 }
 
-function check(files: string[], opts: Record<string, string | boolean | undefined>): number {
+function check(files: string[], opts: Opts): number {
   const version = (opts['focus-version'] as string | undefined ?? '1.4') as FocusVersion
   if (!VERSIONS.includes(version)) throw new UsageError(`FOCUS version must be one of ${VERSIONS.join(', ')}.`)
   if (opts['list-criteria']) {
@@ -228,7 +263,8 @@ async function main(argv: string[]): Promise<number> {
   if (command === 'convert') return convert(files, values)
   if (command === 'check') return check(files, values)
   if (command === 'detect') return detect(files)
-  throw new UsageError(`Unknown command "${command}". Commands: convert, check, detect.`)
+  if (command === 'report') return report(files, values)
+  throw new UsageError(`Unknown command "${command}". Commands: convert, check, detect, report.`)
 }
 
 main(process.argv.slice(2)).then(

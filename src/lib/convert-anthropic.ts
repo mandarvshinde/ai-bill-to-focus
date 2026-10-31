@@ -12,7 +12,7 @@
 // keep the provider's own dollars. Tested on real Console exports.
 
 import {
-  FOCUS_14_COLUMNS, focusRow, headerOf, periods, table, writeCsv,
+  FOCUS_14_COLUMNS, focusRow, headerOf, numeric, periods, table, unreadableWarning, unreadColumns, unreadWarning, writeCsv,
   type Account, type ConvertResult, type ModelPrice, type PriceTable,
 } from './convert-common'
 
@@ -21,6 +21,14 @@ export type { ConvertResult, PriceTable } from './convert-common'
 
 const COST_HEADERS = ['usage_date_utc', 'model', 'token_type', 'cost_usd', 'list_price_usd', 'cost_type']
 const USAGE_HEADERS = ['usage_date_utc', 'model_version', 'usage_input_tokens_no_cache', 'usage_output_tokens']
+
+/** Every column the converter reads or knows is safe to ignore. Anything else is reported. */
+export const COST_COLUMNS = [...COST_HEADERS, 'workspace', 'api_key', 'usage_type', 'context_window', 'inference_geo', 'speed', 'api_key_id', 'api_key_status']
+export const USAGE_COLUMNS = [
+  'usage_date_utc', 'model_version', 'api_key', 'workspace', 'usage_type', 'context_window',
+  'usage_input_tokens_no_cache', 'usage_input_tokens_cache_write_5m', 'usage_input_tokens_cache_write_1h', 'usage_input_tokens_cache_read',
+  'usage_output_tokens', 'web_search_count', 'inference_geo', 'speed',
+]
 
 export function isAnthropicCost(header: string[]) { return COST_HEADERS.every((h) => header.includes(h)) }
 export function isAnthropicUsage(header: string[]) { return USAGE_HEADERS.every((h) => header.includes(h)) }
@@ -49,18 +57,23 @@ const baseId = (id: string) => id.trim().replace(/-\d{8}$/, '')
 export function convertAnthropic(costText: string, usageText: string | null, prices: PriceTable | null, account: Account): ConvertResult {
   const cost = table(costText)
   const warnings: string[] = []
+  let unreadable = 0, unreadableExample = ''
+  const bad = (v: string | null) => { unreadable++; unreadableExample ||= v ?? '' }
 
   // Usage tokens by day, model, workspace, key, context window and speed.
   const usage = new Map<string, number>()
-  if (usageText) {
-    const u = table(usageText)
+  const u = usageText ? table(usageText) : null
+  if (u) {
     for (const r of u.body) {
       const model = u.get(r, 'model_version')
       const date = u.get(r, 'usage_date_utc')
       if (!model || !date) continue
+      const counts = [...Object.entries(TOKEN_METERS).map(([tt, m]) => [tt, m.usageCol]), ['web_search', 'web_search_count']]
+        .map(([k, col]) => [k, u.get(r, col), numeric(u.get(r, col)) ?? 0] as const)
+      const broken = counts.find(([, , n]) => !Number.isFinite(n))
+      if (broken) { bad(broken[1]); continue }
       const base = [date, baseId(model), u.get(r, 'workspace'), u.get(r, 'api_key'), u.get(r, 'context_window'), u.get(r, 'speed')].join('|')
-      for (const [tt, m] of Object.entries(TOKEN_METERS)) usage.set(`${base}|${tt}`, (usage.get(`${base}|${tt}`) ?? 0) + Number(u.get(r, m.usageCol) ?? 0))
-      usage.set(`${base}|web_search`, (usage.get(`${base}|web_search`) ?? 0) + Number(u.get(r, 'web_search_count') ?? 0))
+      for (const [k, , n] of counts) usage.set(`${base}|${k}`, (usage.get(`${base}|${k}`) ?? 0) + n)
     }
   } else {
     warnings.push('No Usage export: rows have no token quantities or unit prices, and costs are rounded to the cent. Add the Usage export for exact, quantity-level FOCUS rows.')
@@ -72,10 +85,13 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
   for (const r of cost.body) {
     if (!cost.get(r, 'usage_date_utc')) continue
     const key = ['usage_date_utc', 'model', 'workspace', 'api_key', 'api_key_id', 'context_window', 'token_type', 'cost_type', 'inference_geo', 'speed', 'usage_type'].map((c) => cost.get(r, c)).join('|')
+    const c = numeric(cost.get(r, 'cost_usd')) ?? 0
+    const lp = numeric(cost.get(r, 'list_price_usd'))
+    if (!Number.isFinite(c)) { bad(cost.get(r, 'cost_usd')); continue }
+    if (lp !== null && !Number.isFinite(lp)) { bad(cost.get(r, 'list_price_usd')); continue }
     const g = groups.get(key) ?? { r, cost: 0, list: null }
-    g.cost += Number(cost.get(r, 'cost_usd') ?? 0)
-    const lp = cost.get(r, 'list_price_usd')
-    if (lp !== null) g.list = (g.list ?? 0) + Number(lp)
+    g.cost += c
+    if (lp !== null) g.list = (g.list ?? 0) + lp
     groups.set(key, g)
   }
 
@@ -158,6 +174,8 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
 
   if (unpriced.size) warnings.push(`No public price for ${[...unpriced].join(', ')}: those rows keep Anthropic's rounded dollars.`)
   if (usageText && providerPriced > 0 && exact > 0) warnings.push(`${providerPriced} row${providerPriced === 1 ? '' : 's'} kept Anthropic's rounded dollars (no matching usage, no public price, or a non-token charge).`)
+  const unread = { cost: unreadColumns(cost.header, COST_COLUMNS), ...(u ? { usage: unreadColumns(u.header, USAGE_COLUMNS) } : {}) }
+  for (const w of [unreadableWarning(unreadable, unreadableExample), unreadWarning('Cost export', unread.cost), unreadWarning('Usage export', unread.usage ?? [])]) if (w) warnings.push(w)
 
   return {
     csv: writeCsv([...FOCUS_14_COLUMNS, ...EXTRA_COLUMNS], out),
@@ -169,6 +187,8 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
     quantityRows: exact + derived,
     providerPricedRows: providerPriced,
     unpricedModels: [...unpriced],
+    unreadableRows: unreadable,
+    unreadColumns: unread,
     warnings,
   }
 }

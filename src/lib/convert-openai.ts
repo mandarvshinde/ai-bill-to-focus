@@ -11,13 +11,29 @@
 // only fill ConsumedQuantity and derive the unit price, so a mismatched join
 // can never change a dollar figure. OpenAI counts cached input INSIDE
 // input_tokens, so uncached input = input_tokens - input_cached_tokens.
+// Reasoning tokens are billed as output and sit inside output_tokens the same
+// way, so they are never added on top.
+//
+// Batch and the flex/priority service tiers price the same model and meter
+// differently. When the cost file splits a tier into its own line item, the
+// usage file's tokens are split the same way (batch / service_tier columns),
+// so each price gets only its own tokens.
 
 import {
-  FOCUS_14_COLUMNS, focusRow, headerOf, periods, priceFor, slug, table, writeCsv,
+  FOCUS_14_COLUMNS, focusRow, headerOf, numeric, periods, priceFor, slug, table, unreadableWarning, unreadColumns, unreadWarning, writeCsv,
   type Account, type ConvertResult, type PriceTable,
 } from './convert-common'
 
 const TIME_ONLY = ['start_time', 'end_time', 'start_time_iso', 'end_time_iso']
+
+/** Every column the converter reads or knows is safe to ignore. Anything else is reported. */
+export const COST_COLUMNS = [...TIME_ONLY, 'amount_value', 'amount_currency', 'line_item', 'project_id', 'project_name', 'organization_id', 'organization_name']
+export const USAGE_COLUMNS = [
+  ...TIME_ONLY, 'input_tokens', 'output_tokens', 'input_cached_tokens', 'input_audio_tokens', 'output_audio_tokens',
+  'num_model_requests', 'project_id', 'user_id', 'api_key_id', 'model', 'batch', 'service_tier',
+  // A breakdown of output_tokens, never added to it.
+  'output_reasoning_tokens',
+]
 
 export function isOpenAICost(header: string[]) { return header.includes('amount_value') && header.includes('line_item') }
 export function isOpenAIUsage(header: string[]) { return header.includes('input_tokens') && header.includes('output_tokens') && header.includes('num_model_requests') }
@@ -30,12 +46,31 @@ export function exportKind(text: string): 'openai-cost' | 'openai-usage' | 'open
 }
 
 type Kind = 'input' | 'cached' | 'cache-write' | 'audio-input' | 'audio-output' | 'output' | 'other'
+export type Tier = 'standard' | 'batch' | 'flex' | 'priority'
 
-/** "gpt-4o-2024-08-06, cached input" -> model + kind. Unknown kinds stay as written. */
-export function parseLineItem(lineItem: string): { model: string; kind: Kind; label: string } {
-  const i = lineItem.lastIndexOf(',')
-  const model = (i === -1 ? lineItem : lineItem.slice(0, i)).trim()
-  const label = (i === -1 ? '' : lineItem.slice(i + 1)).trim()
+// "(batch)", "batch", "flex tier", "[priority]" anywhere in a line item.
+const TIER_WORD = /\s*[([]?\b(batch|flex|priority)\b(\s+(api|tier|processing))?[)\]]?/i
+const TIERS: Record<Exclude<Tier, 'standard'>, { label: string; mult: number }> = {
+  batch: { label: 'Batch', mult: 0.5 },
+  flex: { label: 'Flex', mult: 0.5 },
+  priority: { label: 'Priority', mult: 2 },
+}
+
+/** A usage row's price tier: the batch flag first, then service_tier. */
+export function usageTier(batch: string | null, serviceTier: string | null): Tier {
+  if (batch && /^(true|1|yes)$/i.test(batch)) return 'batch'
+  const t = serviceTier?.toLowerCase()
+  return t === 'flex' || t === 'priority' ? t : 'standard'
+}
+
+/** "gpt-4o-2024-08-06, cached input (batch)" -> model + kind + tier. Unknown kinds stay as written. */
+export function parseLineItem(lineItem: string): { model: string; kind: Kind; label: string; tier: Tier } {
+  const tierMatch = TIER_WORD.exec(lineItem)
+  const tier = (tierMatch?.[1].toLowerCase() ?? 'standard') as Tier
+  const plain = tierMatch ? lineItem.replace(TIER_WORD, '') : lineItem
+  const i = plain.lastIndexOf(',')
+  const model = (i === -1 ? plain : plain.slice(0, i)).trim()
+  const label = (i === -1 ? '' : plain.slice(i + 1)).trim()
   const l = label.toLowerCase()
   const kind: Kind =
     /cache[ds]?\s*writ/.test(l) ? 'cache-write'
@@ -45,7 +80,7 @@ export function parseLineItem(lineItem: string): { model: string; kind: Kind; la
             : /\binput\b/.test(l) ? 'input'
               : /\boutput\b/.test(l) ? 'output'
                 : 'other'
-  return { model, kind, label }
+  return { model, kind, label, tier }
 }
 
 const METERS: Record<Exclude<Kind, 'other'>, { meter: string; suffix: string; direction: string; cache?: string }> = {
@@ -78,61 +113,100 @@ function bucketEnd(t: ReturnType<typeof table>, r: string[]): Date | undefined {
 export function convertOpenAI(costText: string, usageText: string | null, prices: PriceTable | null, fallback: Account): ConvertResult {
   const cost = table(costText)
   const warnings: string[] = []
+  let unreadable = 0, unreadableExample = ''
+  const bad = (v: string | null) => { unreadable++; unreadableExample ||= v ?? '' }
 
-  // Completions tokens by day + model (+ project when both files have it).
+  // Completions tokens by day + model (+ project when both files have it),
+  // per price tier and summed over tiers ("*").
   const usage = new Map<string, number>()
-  const usageByProject = usageText ? table(usageText).has('project_id') && cost.has('project_id') : false
-  if (usageText) {
-    const u = table(usageText)
+  const usageTiers = new Map<string, Set<Tier>>()
+  const u = usageText ? table(usageText) : null
+  const usageByProject = u ? u.has('project_id') && cost.has('project_id') : false
+  if (u) {
     for (const r of u.body) {
       const start = bucketStart(u, r)
       const model = u.get(r, 'model')
       if (!start || !model) continue
+      const counts: Record<string, number> = {}
+      let ok = true
+      for (const c of ['input_tokens', 'input_cached_tokens', 'output_tokens', 'input_audio_tokens', 'output_audio_tokens']) {
+        const v = numeric(u.get(r, c))
+        if (v !== null && !Number.isFinite(v)) { bad(u.get(r, c)); ok = false; break }
+        counts[c] = v ?? 0
+      }
+      if (!ok) continue
       const key = [dayOf(start.toISOString()), baseModel(model), usageByProject ? u.get(r, 'project_id') : ''].join('|')
-      const n = (c: string) => Number(u.get(r, c) ?? 0)
-      const add = (kind: Kind, v: number) => usage.set(`${key}|${kind}`, (usage.get(`${key}|${kind}`) ?? 0) + v)
+      const tier = usageTier(u.get(r, 'batch'), u.get(r, 'service_tier'))
+      if (!usageTiers.has(key)) usageTiers.set(key, new Set())
+      usageTiers.get(key)!.add(tier)
+      const add = (kind: Kind, v: number) => {
+        for (const t of [tier, '*']) usage.set(`${key}|${t}|${kind}`, (usage.get(`${key}|${t}|${kind}`) ?? 0) + v)
+      }
       // OpenAI's input_tokens already includes the cached tokens.
-      add('input', Math.max(0, n('input_tokens') - n('input_cached_tokens')))
-      add('cached', n('input_cached_tokens'))
-      add('output', n('output_tokens'))
-      add('audio-input', n('input_audio_tokens'))
-      add('audio-output', n('output_audio_tokens'))
+      add('input', Math.max(0, counts.input_tokens - counts.input_cached_tokens))
+      add('cached', counts.input_cached_tokens)
+      add('output', counts.output_tokens)
+      add('audio-input', counts.input_audio_tokens)
+      add('audio-output', counts.output_audio_tokens)
     }
     if (!u.body.length) warnings.push('The usage file has no rows, so token quantities are empty.')
   } else {
     warnings.push('No Completions usage export: rows carry OpenAI\'s dollars but no token quantities or unit prices.')
   }
 
+  // Day+model keys whose cost line items split out a tier: there, each line
+  // item gets only its own tier's tokens. Elsewhere it gets all of them.
+  const keyOf = (r: string[], model: string) => {
+    const start = bucketStart(cost, r)
+    return start ? [dayOf(start.toISOString()), baseModel(model), usageByProject ? cost.get(r, 'project_id') : ''].join('|') : null
+  }
+  const tieredCost = new Set<string>()
+  for (const r of cost.body) {
+    const li = parseLineItem(cost.get(r, 'line_item') ?? '')
+    const key = li.tier !== 'standard' ? keyOf(r, li.model) : null
+    if (key) tieredCost.add(key)
+  }
+
   const out: Record<string, string | null>[] = []
   let skipped = 0, providerTotal = 0, withQty = 0, withoutQty = 0, dropped = 0
   const unknownKinds = new Set<string>()
+  const blended = new Set<string>()
 
   for (const r of cost.body) {
     const start = bucketStart(cost, r)
     if (!start) continue
-    const amount = Number(cost.get(r, 'amount_value') ?? 0)
+    const amount = numeric(cost.get(r, 'amount_value')) ?? 0
+    if (!Number.isFinite(amount)) { bad(cost.get(r, 'amount_value')); continue }
     const lineItem = cost.get(r, 'line_item') ?? 'Unspecified'
     providerTotal += amount
     const currency = (cost.get(r, 'amount_currency') ?? 'usd').toUpperCase()
     if (currency !== 'USD') warnings.push(`Row with currency ${currency}: kept as written; BillingCurrency is USD for this file.`)
 
-    const { model, kind, label } = parseLineItem(lineItem)
+    const { model, kind, label, tier } = parseLineItem(lineItem)
     const projectId = cost.get(r, 'project_id')
-    const key = [dayOf(start.toISOString()), baseModel(model), usageByProject ? projectId : ''].join('|')
+    const key = keyOf(r, model)!
+    const tierInfo = tier === 'standard' ? null : TIERS[tier]
 
     let qty: number | null = null
     let meter: string, skuId: string, details: Record<string, string> | null
     if (kind === 'other') {
       unknownKinds.add(label || lineItem)
       meter = label || lineItem
-      skuId = `openai/${slug(model)}${label ? `/${slug(label)}` : ''}`
+      skuId = `openai/${slug(model)}${label ? `/${slug(label)}` : ''}${tierInfo ? `/${tier}` : ''}`
       details = null
     } else {
       const m = METERS[kind]
-      meter = m.meter
-      skuId = `openai/${model}/${m.suffix}`
-      details = { x_ModelDeveloper: 'OpenAI', x_ModelId: model, x_TokenDirection: m.direction, ...(m.cache ? { x_TokenCacheAction: m.cache } : {}) }
-      if (usageText && kind !== 'cache-write') qty = usage.get(`${key}|${kind}`) ?? null
+      meter = tierInfo ? `${m.meter} (${tierInfo.label})` : m.meter
+      skuId = `openai/${model}/${m.suffix}${tierInfo ? `-${tier}` : ''}`
+      details = {
+        x_ModelDeveloper: 'OpenAI', x_ModelId: model, x_TokenDirection: m.direction,
+        ...(m.cache ? { x_TokenCacheAction: m.cache } : {}), ...(tierInfo ? { x_ServiceTier: tierInfo.label } : {}),
+      }
+      if (u && kind !== 'cache-write') {
+        const split = tieredCost.has(key)
+        qty = usage.get(`${key}|${split ? tier : '*'}|${kind}`) ?? null
+        if (!split && qty && (usageTiers.get(key)?.size ?? 0) > 1) blended.add(model)
+      }
     }
 
     if (amount === 0 && !qty) { skipped++; continue }
@@ -142,7 +216,8 @@ export function convertOpenAI(costText: string, usageText: string | null, prices
     // A joined quantity that implies a price far from the public one is a bad
     // join (e.g. a line item the usage file splits differently): drop it.
     const pub = kind === 'other' ? null : priceFor(prices, model)
-    const pubRate = pub ? (kind === 'cached' ? pub.cacheRead : kind === 'output' || kind === 'audio-output' ? pub.output : pub.input) : null
+    const base = pub ? (kind === 'cached' ? pub.cacheRead : kind === 'output' || kind === 'audio-output' ? pub.output : pub.input) : null
+    const pubRate = base !== null ? base * (tierInfo?.mult ?? 1) : null
     if (unitPrice !== null && pubRate && pubRate > 0 && (unitPrice > pubRate * 3 || unitPrice < pubRate / 3)) {
       dropped++
       qty = null; pricingQty = null; unitPrice = null
@@ -162,9 +237,12 @@ export function convertOpenAI(costText: string, usageText: string | null, prices
     ))
   }
 
+  const unread = { cost: unreadColumns(cost.header, COST_COLUMNS), ...(u ? { usage: unreadColumns(u.header, USAGE_COLUMNS) } : {}) }
   if (unknownKinds.size) warnings.push(`Line items kept as written, not split by token type: ${[...unknownKinds].slice(0, 6).join(', ')}${unknownKinds.size > 6 ? ', …' : ''}.`)
+  if (blended.size) warnings.push(`The usage file mixes Batch or service-tier tokens with standard ones for ${[...blended].slice(0, 4).join(', ')}, but the cost file doesn't split them, so those unit prices blend the two rates. Dollars are unaffected.`)
   if (dropped) warnings.push(`${dropped} row${dropped === 1 ? '' : 's'}: the usage file's token count implied a price far from OpenAI's public one, so the quantity was left out rather than trusted.`)
-  if (usageText && withoutQty && withQty) warnings.push(`${withoutQty} row${withoutQty === 1 ? ' has' : 's have'} no matching token count in the usage file.`)
+  if (u && withoutQty && withQty) warnings.push(`${withoutQty} row${withoutQty === 1 ? ' has' : 's have'} no matching token count in the usage file.`)
+  for (const w of [unreadableWarning(unreadable, unreadableExample), unreadWarning('cost export', unread.cost), unreadWarning('usage export', unread.usage ?? [])]) if (w) warnings.push(w)
 
   return {
     csv: writeCsv([...FOCUS_14_COLUMNS, ...EXTRA_COLUMNS], out),
@@ -176,6 +254,8 @@ export function convertOpenAI(costText: string, usageText: string | null, prices
     quantityRows: withQty,
     providerPricedRows: withoutQty,
     unpricedModels: [],
+    unreadableRows: unreadable,
+    unreadColumns: unread,
     warnings: [...new Set(warnings)],
   }
 }
