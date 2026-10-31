@@ -77,7 +77,7 @@ test('openai: Batch line items get only Batch tokens, standard ones only standar
 
 test('openai: a cost file that does not split Batch gets a blended price and a note', () => {
   // The same dollars, with each Batch line item folded into its standard one.
-  const cost = readFileSync(fx('openai-batch-cost.csv'), 'utf8').split('\n').filter((l) => !l.includes('(batch)'))
+  const cost = readFileSync(fx('openai-batch-cost.csv'), 'utf8').split(/\r?\n/).filter((l) => !l.includes('(batch)'))
     .map((l) => l.replace(',0.25,usd,', ',0.75,usd,').replace(',0.3,usd,', ',0.8,usd,')).join('\n')
   const file = join(out, 'openai-unsplit.csv')
   writeFileSync(file, cost)
@@ -88,7 +88,8 @@ test('openai: a cost file that does not split Batch gets a blended price and a n
 })
 
 test('format changes: unknown columns are named, non-numeric cells fail the run', () => {
-  const lines = readFileSync(fx('openai-cost.csv'), 'utf8').trim().split('\n')
+  // Split on CRLF too: git on Windows checks the fixtures out with CRLF line endings.
+  const lines = readFileSync(fx('openai-cost.csv'), 'utf8').trim().split(/\r?\n/)
   const extra = join(out, 'openai-extra.csv')
   writeFileSync(extra, lines.map((l, i) => l + (i ? ',0' : ',amount_tax')).join('\n'))
   const a = run('convert', extra, '--offline')
