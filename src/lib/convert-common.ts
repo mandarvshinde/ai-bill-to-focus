@@ -44,7 +44,7 @@ export interface ConvertResult {
   quantityRows: number
   providerPricedRows: number
   unpricedModels: string[]
-  /** Rows left out because a dollar or token cell wasn't a number: usually a changed export format. */
+  /** Rows left out because a dollar, token or date cell couldn't be read: usually a changed export format. */
   unreadableRows: number
   /** Export columns the converter doesn't read, by file role. */
   unreadColumns: Partial<Record<'cost' | 'usage', string[]>>
@@ -75,6 +75,38 @@ export function unreadWarning(file: string, cols: string[]): string | null {
 
 export function unreadableWarning(n: number, example: string): string | null {
   return n ? `${n} row${n === 1 ? ' was' : 's were'} left out because a dollar or token cell wasn't a number (for example ${JSON.stringify(example)}). The columns may have shifted; totals don't include ${n === 1 ? 'it' : 'them'}.` : null
+}
+
+/** A date-only or date-time cell as the UTC calendar day it starts, or null if unreadable. */
+export function utcDay(v: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v.trim())
+  if (m) {
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]))
+    return d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] ? d : null
+  }
+  // Otherwise only a month/day/year or "Oct 1, 2026" style date: JavaScript's
+  // own parser accepts almost anything ("week 40" is a date to it).
+  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v.trim())
+  if (us) {
+    const d = new Date(Date.UTC(+us[3], +us[1] - 1, +us[2]))
+    return d.getUTCMonth() === +us[1] - 1 && d.getUTCDate() === +us[2] ? d : null
+  }
+  if (!/^[A-Za-z]{3,9}\.? \d{1,2}, \d{4}$/.test(v.trim())) return null
+  const t = Date.parse(`${v} UTC`)
+  if (Number.isNaN(t)) return null
+  const d = new Date(t)
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+}
+
+/**
+ * Rows left out because their date couldn't be read. Their dollars still count
+ * in the provider's total, so the reconciliation shows the gap instead of two
+ * totals that agree only because the same rows are missing from both.
+ */
+export function badDateWarning(n: number, example: string, usd: number): string | null {
+  if (!n) return null
+  const money = usd ? ` They carry ${usd < 0.01 ? `$${usd.toFixed(6)}` : `$${usd.toFixed(2)}`}, which is in the provider's total but not in BilledCost.` : ''
+  return `${n} row${n === 1 ? ' was' : 's were'} left out because the date couldn't be read (for example ${JSON.stringify(example)}). The export's date format may have changed.${money}`
 }
 
 export interface Account { id: string; name: string }

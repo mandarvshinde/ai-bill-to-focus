@@ -44,8 +44,11 @@ convert
     Together AI Cost analytics -> Download CSV               from documentation
 
   -o, --output <file>      Write the FOCUS CSV here (default: stdout)
-      --account-id <id>    BillingAccountId (default: from the file, or a placeholder)
-      --account-name <s>   BillingAccountName
+      --account-id <id>    BillingAccountId: the organization the provider invoices
+                           (default: from the file, or a placeholder). Anthropic:
+                           the organization UUID in Claude Console -> Settings ->
+                           Organization (or GET /v1/organizations/me). OpenAI: org-...
+      --account-name <s>   BillingAccountName: the organization's name
       --prices <file>      Price list JSON (format of api.cognocient.com/api/estimate/models)
       --offline            Don't fetch the public price list (Anthropic rows keep
                            the export's rounded dollars; OpenAI skips its price sanity check)
@@ -165,6 +168,9 @@ async function convert(files: string[], opts: Opts): Promise<number> {
     : result.quantityRows ? " (unit prices from the provider's dollars)" : ''
   err(`  ${result.quantityRows} rows with quantities and unit prices${how}, ${result.rows - result.quantityRows} with the provider's dollars only, ${result.skippedZeroRows} zero rows skipped`)
   for (const w of result.warnings) err(`  note: ${w}`)
+  if (p !== 'openai' && !(opts['account-id'] as string | undefined)?.trim()) {
+    err(`  note: BillingAccountId is the placeholder "${DEFAULT_ACCOUNT[p].id}". Pass --account-id with your ${LABEL[p]} organization ID${p === 'anthropic' ? ' (Claude Console -> Settings -> Organization)' : ''} so the rows reconcile against the invoice.`)
+  }
   if (UNVERIFIED[p] || result.warnings.length) err(`  To report a problem without sharing the file: ai-bill-to-focus report ${files.map((f) => basename(f)).join(' ')}`)
 
   let code = result.unreadableRows ? 1 : 0

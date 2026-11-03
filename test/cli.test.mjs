@@ -103,6 +103,48 @@ test('format changes: unknown columns are named, non-numeric cells fail the run'
   assert.match(b.stderr, /1 row was left out because a dollar or token cell wasn't a number \(for example "Search"\)/)
 })
 
+test('unreadable dates: the row is left out, its dollars stay in the provider total, the run fails', () => {
+  const total = (stderr) => {
+    const m = /provider total \$([\d.]+), FOCUS BilledCost total \$([\d.]+)/.exec(stderr)
+    return m ? [Number(m[1]), Number(m[2])] : null
+  }
+  // OpenAI: one paid row whose ISO date and epoch seconds are both unreadable.
+  const o = readFileSync(fx('openai-cost.csv'), 'utf8').trim().split(/\r?\n/)
+  const oBad = join(out, 'openai-bad-date.csv')
+  writeFileSync(oBad, o.map((l, i) => (i === 1 ? l.replace(/^\d+,\d+,[^,]+,/, 'x,y,week 40,') : l)).join('\n'))
+  const a = run('convert', oBad, '--offline')
+  assert.equal(a.status, 1, a.stderr)
+  assert.match(a.stderr, /1 row was left out because the date couldn't be read \(for example "week 40"\)/)
+  const [ap, af] = total(a.stderr)
+  assert.ok(Math.abs(ap - af - 0.25) < 0.005, a.stderr)
+
+  // Anthropic: an empty date on a paid row, and a US-format date that should still convert.
+  const n = readFileSync(fx('anthropic-cost.csv'), 'utf8').trim().split(/\r?\n/)
+  const nBad = join(out, 'anthropic-bad-date.csv')
+  writeFileSync(nBad, n.map((l, i) => (i === 1 ? l.replace(/^2026-10-01,/, ',') : i === 2 ? l.replace(/^2026-10-01,/, '10/01/2026,') : l)).join('\n'))
+  const b = run('convert', nBad, '--offline', '--account-id', '00000000-0000-0000-0000-000000000000')
+  assert.equal(b.status, 1, b.stderr)
+  assert.match(b.stderr, /1 row was left out because the date couldn't be read/)
+  assert.doesNotMatch(b.stderr, /placeholder/)
+  const [bp, bf] = total(b.stderr)
+  assert.ok(Math.abs(bp - bf - 0.30) < 0.005, b.stderr)
+
+  // Together: same rule.
+  const t = readFileSync(fx('together.csv'), 'utf8').trim().split(/\r?\n/)
+  const tBad = join(out, 'together-bad-date.csv')
+  writeFileSync(tBad, t.map((l, i) => (i === 1 ? l.replace(/^2026-10-01,/, 'Oct 1st,') : l)).join('\n'))
+  const c = run('convert', tBad)
+  assert.equal(c.status, 1, c.stderr)
+  const [cp, cf] = total(c.stderr)
+  assert.ok(Math.abs(cp - cf - 1.32) < 0.005, c.stderr)
+})
+
+test('a placeholder BillingAccountId gets a note saying where the real one is', () => {
+  const r = run('convert', fx('anthropic-cost.csv'), '--offline')
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stderr, /BillingAccountId is the placeholder "anthropic-organization".*Settings -> Organization/)
+})
+
 test('report: describes the files without dollars, names or fine-tune owners', () => {
   const r = run('report', fx('openai-batch-cost.csv'), fx('openai-batch-usage.csv'), '--prices', fx('prices.json'))
   assert.equal(r.status, 0, r.stderr + r.stdout)

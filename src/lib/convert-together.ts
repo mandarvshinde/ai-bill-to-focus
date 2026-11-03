@@ -8,7 +8,7 @@
 // more. Not yet tested on a real export.
 
 import {
-  FOCUS_14_COLUMNS, focusRow, headerOf, numeric, periods, slug, table, unreadableWarning, unreadColumns, unreadWarning, writeCsv,
+  badDateWarning, FOCUS_14_COLUMNS, focusRow, headerOf, numeric, periods, slug, table, unreadableWarning, unreadColumns, unreadWarning, utcDay, writeCsv,
   type Account, type ConvertResult,
 } from './convert-common'
 
@@ -25,24 +25,23 @@ export function exportKind(text: string): 'together-cost' | null {
 const EXTRA_COLUMNS = ['x_PriceSource', 'x_LineItem', 'x_Dimensions']
 
 /** Dates are UTC per Together's docs; the format isn't documented, so take any parseable one. */
-function utcDay(v: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v)
-  if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]))
-  const t = Date.parse(`${v} UTC`)
-  if (Number.isNaN(t)) return null
-  const d = new Date(t)
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
-}
-
 export function convertTogether(text: string, account: Account): ConvertResult {
   const t = table(text)
   const out: Record<string, string | null>[] = []
-  let skipped = 0, total = 0, withQty = 0, withoutQty = 0, badDates = 0, unreadable = 0, unreadableExample = ''
+  let skipped = 0, total = 0, withQty = 0, withoutQty = 0, badDates = 0, badDateUsd = 0, badDateExample = '', unreadable = 0, unreadableExample = ''
 
   for (const r of t.body) {
     const dateText = t.get(r, 'Date')
     const day = dateText ? utcDay(dateText) : null
-    if (!day) { if (r.some((c) => c.trim())) badDates++; continue }
+    if (!day) {
+      if (r.some((c) => c.trim())) {
+        badDates++
+        badDateExample ||= dateText ?? ''
+        const a = numeric(t.get(r, 'Amount (USD)'))
+        if (a !== null && Number.isFinite(a)) { badDateUsd += a }
+      }
+      continue
+    }
     const amount = numeric(t.get(r, 'Amount (USD)')) ?? 0
     const qty = numeric(t.get(r, 'Quantity'))
     const price = numeric(t.get(r, 'Unit Price (USD)'))
@@ -72,21 +71,20 @@ export function convertTogether(text: string, account: Account): ConvertResult {
   }
 
   const warnings = ['Together\'s docs don\'t say which unit Quantity is in, so it is written as "Units". If your file shows tokens or millions of tokens, tell us and we\'ll map it properly.']
-  if (badDates) warnings.push(`${badDates} row${badDates === 1 ? '' : 's'} had a Date we couldn't read and were left out.`)
   const unread = { cost: unreadColumns(t.header, COST_COLUMNS) }
-  for (const w of [unreadableWarning(unreadable, unreadableExample), unreadWarning('export', unread.cost)]) if (w) warnings.push(w)
+  for (const w of [badDateWarning(badDates, badDateExample, badDateUsd), unreadableWarning(unreadable, unreadableExample), unreadWarning('export', unread.cost)]) if (w) warnings.push(w)
 
   return {
     csv: writeCsv([...FOCUS_14_COLUMNS, ...EXTRA_COLUMNS], out),
     rows: out.length,
     skippedZeroRows: skipped,
-    providerTotal: total,
+    providerTotal: total + badDateUsd,
     focusTotal: total,
     exactRows: withQty,
     quantityRows: withQty,
     providerPricedRows: withoutQty,
     unpricedModels: [],
-    unreadableRows: unreadable,
+    unreadableRows: unreadable + badDates,
     unreadColumns: unread,
     warnings,
   }

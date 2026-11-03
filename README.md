@@ -73,7 +73,8 @@ Columns are read by name, so a reordered file converts the same. Every converter
   - **OpenAI Batch and service tiers:** Batch, Flex and Priority bill the same model and token type at a different price. When the cost export gives a tier its own line item, it becomes its own FOCUS row (`SkuId` `.../input-batch`, `SkuMeter` "Input Tokens (Batch)") and gets only that tier's tokens, using the usage export's `batch` and `service_tier` columns. If the cost export doesn't split them, the row's unit price is a blend of the two rates and a note says so.
 - Unit prices are written to 12 significant digits and dollar amounts to 10 decimal places, so there is no floating-point noise. The one exception is `ListCost`: it is the exact floating-point product of `ListUnitPrice` and `PricingQuantity` (for example `0.30000000000000004` for 3.0 × 0.1), because the FOCUS validator checks that product with exact equality.
 - Provider details that FOCUS has no column for are kept as `x_` columns: workspace, API key, project, line item and so on. `Tags` is a single JSON column, as the spec requires.
-- `BillingAccountId` and `BillingAccountName` come from the file when it has them; otherwise set them with `--account-id` and `--account-name`.
+- `BillingAccountId` and `BillingAccountName` come from the file when it has them; otherwise set them with `--account-id` and `--account-name`. In FOCUS the billing account is the entity the provider invoices. For Anthropic that is your organization: its UUID is in Claude Console under Settings > Organization (or `GET /v1/organizations/me` with an Admin API key). For OpenAI it is the `org-...` ID under Settings > Organization > General.
+- A row whose date can't be read is left out, but its dollars stay in the provider total, so the reconciliation line shows the gap and the run exits 1.
 
 ## Commands
 

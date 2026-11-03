@@ -20,7 +20,7 @@
 // so each price gets only its own tokens.
 
 import {
-  FOCUS_14_COLUMNS, focusRow, headerOf, numeric, periods, priceFor, slug, table, unreadableWarning, unreadColumns, unreadWarning, writeCsv,
+  badDateWarning, FOCUS_14_COLUMNS, focusRow, headerOf, numeric, periods, priceFor, slug, table, unreadableWarning, unreadColumns, unreadWarning, writeCsv,
   type Account, type ConvertResult, type PriceTable,
 } from './convert-common'
 
@@ -97,15 +97,24 @@ const EXTRA_COLUMNS = ['x_PriceSource', 'x_LineItem', 'x_ProjectId', 'x_ProjectN
 const dayOf = (iso: string) => iso.slice(0, 10)
 const baseModel = (m: string) => m.replace(/-\d{4}-\d{2}-\d{2}$/, '')
 
+// ISO text only: JavaScript's Date parser accepts almost anything ("week 40"
+// is a date to it), which would turn a changed format into wrong dates.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}([T ][\d:.]+)?(Z|[+-]\d{2}:?\d{2})?$/
+const isoDate = (v: string | null) => {
+  if (!v || !ISO_DATE.test(v.trim())) return null
+  const d = new Date(v.trim().replace(' ', 'T'))
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
 function bucketStart(t: ReturnType<typeof table>, r: string[]): Date | null {
   const isoText = t.get(r, 'start_time_iso')
-  if (isoText) { const d = new Date(isoText); if (!Number.isNaN(d.getTime())) return d }
+  if (isoText) { const d = isoDate(isoText); if (d) return d }
   const secs = Number(t.get(r, 'start_time'))
   return Number.isFinite(secs) && secs > 0 ? new Date(secs * 1000) : null
 }
 function bucketEnd(t: ReturnType<typeof table>, r: string[]): Date | undefined {
   const isoText = t.get(r, 'end_time_iso')
-  if (isoText) { const d = new Date(isoText); if (!Number.isNaN(d.getTime())) return d }
+  if (isoText) { const d = isoDate(isoText); if (d) return d }
   const secs = Number(t.get(r, 'end_time'))
   return Number.isFinite(secs) && secs > 0 ? new Date(secs * 1000) : undefined
 }
@@ -168,13 +177,24 @@ export function convertOpenAI(costText: string, usageText: string | null, prices
   }
 
   const out: Record<string, string | null>[] = []
-  let skipped = 0, providerTotal = 0, withQty = 0, withoutQty = 0, dropped = 0
+  let skipped = 0, providerTotal = 0, focusTotal = 0, withQty = 0, withoutQty = 0, dropped = 0
   const unknownKinds = new Set<string>()
   const blended = new Set<string>()
 
+  let badDates = 0, badDateUsd = 0, badDateExample = ''
   for (const r of cost.body) {
     const start = bucketStart(cost, r)
-    if (!start) continue
+    if (!start) {
+      // A paid row with an unreadable date still counts in OpenAI's total, so
+      // the reconciliation shows the gap instead of hiding it.
+      if (r.some((c) => c.trim())) {
+        badDates++
+        badDateExample ||= cost.get(r, 'start_time_iso') ?? cost.get(r, 'start_time') ?? ''
+        const a = numeric(cost.get(r, 'amount_value'))
+        if (a !== null && Number.isFinite(a)) { badDateUsd += a; providerTotal += a }
+      }
+      continue
+    }
     const amount = numeric(cost.get(r, 'amount_value')) ?? 0
     if (!Number.isFinite(amount)) { bad(cost.get(r, 'amount_value')); continue }
     const lineItem = cost.get(r, 'line_item') ?? 'Unspecified'
@@ -225,6 +245,7 @@ export function convertOpenAI(costText: string, usageText: string | null, prices
     if (qty) withQty++
     else withoutQty++
 
+    focusTotal += amount
     out.push(focusRow(
       {
         provider: 'OpenAI', service: 'OpenAI API', description: kind === 'other' && !label ? lineItem : `${meter} - ${model}`,
@@ -242,19 +263,19 @@ export function convertOpenAI(costText: string, usageText: string | null, prices
   if (blended.size) warnings.push(`The usage file mixes Batch or service-tier tokens with standard ones for ${[...blended].slice(0, 4).join(', ')}, but the cost file doesn't split them, so those unit prices blend the two rates. Dollars are unaffected.`)
   if (dropped) warnings.push(`${dropped} row${dropped === 1 ? '' : 's'}: the usage file's token count implied a price far from OpenAI's public one, so the quantity was left out rather than trusted.`)
   if (u && withoutQty && withQty) warnings.push(`${withoutQty} row${withoutQty === 1 ? ' has' : 's have'} no matching token count in the usage file.`)
-  for (const w of [unreadableWarning(unreadable, unreadableExample), unreadWarning('cost export', unread.cost), unreadWarning('usage export', unread.usage ?? [])]) if (w) warnings.push(w)
+  for (const w of [badDateWarning(badDates, badDateExample, badDateUsd), unreadableWarning(unreadable, unreadableExample), unreadWarning('cost export', unread.cost), unreadWarning('usage export', unread.usage ?? [])]) if (w) warnings.push(w)
 
   return {
     csv: writeCsv([...FOCUS_14_COLUMNS, ...EXTRA_COLUMNS], out),
     rows: out.length,
     skippedZeroRows: skipped,
     providerTotal,
-    focusTotal: providerTotal,
+    focusTotal,
     exactRows: withQty,
     quantityRows: withQty,
     providerPricedRows: withoutQty,
     unpricedModels: [],
-    unreadableRows: unreadable,
+    unreadableRows: unreadable + badDates,
     unreadColumns: unread,
     warnings: [...new Set(warnings)],
   }

@@ -12,7 +12,7 @@
 // keep the provider's own dollars. Tested on real Console exports.
 
 import {
-  FOCUS_14_COLUMNS, focusRow, headerOf, numeric, periods, table, unreadableWarning, unreadColumns, unreadWarning, writeCsv,
+  badDateWarning, FOCUS_14_COLUMNS, focusRow, headerOf, numeric, periods, table, unreadableWarning, unreadColumns, unreadWarning, utcDay, writeCsv,
   type Account, type ConvertResult, type ModelPrice, type PriceTable,
 } from './convert-common'
 
@@ -82,8 +82,20 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
   // Sum identical cost rows (the export repeats some non-token lines).
   type Agg = { r: string[]; cost: number; list: number | null }
   const groups = new Map<string, Agg>()
+  let badDates = 0, badDateUsd = 0, badDateExample = ''
   for (const r of cost.body) {
-    if (!cost.get(r, 'usage_date_utc')) continue
+    const dateText = cost.get(r, 'usage_date_utc')
+    if (!dateText || !utcDay(dateText)) {
+      // A paid row with no readable date still counts in Anthropic's total, so
+      // the reconciliation shows the gap instead of hiding it.
+      if (r.some((c) => c.trim())) {
+        badDates++
+        badDateExample ||= dateText ?? ''
+        const c = numeric(cost.get(r, 'cost_usd'))
+        if (c !== null && Number.isFinite(c)) badDateUsd += c
+      }
+      continue
+    }
     const key = ['usage_date_utc', 'model', 'workspace', 'api_key', 'api_key_id', 'context_window', 'token_type', 'cost_type', 'inference_geo', 'speed', 'usage_type'].map((c) => cost.get(r, c)).join('|')
     const c = numeric(cost.get(r, 'cost_usd')) ?? 0
     const lp = numeric(cost.get(r, 'list_price_usd'))
@@ -96,7 +108,7 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
   }
 
   const out: Record<string, string | null>[] = []
-  let skipped = 0, providerTotal = 0, focusTotal = 0, exact = 0, derived = 0, providerPriced = 0
+  let skipped = 0, providerTotal = badDateUsd, focusTotal = 0, exact = 0, derived = 0, providerPriced = 0
   const unpriced = new Set<string>()
 
   for (const { r, cost: costUsd, list } of groups.values()) {
@@ -164,7 +176,7 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
         skuId, meter, details, consumed: qty, consumedUnit, pricingUnit, pricingQty, unitPrice, listCost, billed,
       },
       account,
-      periods(new Date(`${date}T00:00:00Z`)),
+      periods(utcDay(date)!),
       {
         x_PriceSource: source, x_Workspace: cost.get(r, 'workspace'), x_ApiKeyName: cost.get(r, 'api_key'), x_ApiKeyId: cost.get(r, 'api_key_id'),
         x_ContextWindow: cost.get(r, 'context_window'), x_InferenceGeo: cost.get(r, 'inference_geo'), x_Speed: cost.get(r, 'speed'),
@@ -175,7 +187,7 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
   if (unpriced.size) warnings.push(`No public price for ${[...unpriced].join(', ')}: those rows keep Anthropic's rounded dollars.`)
   if (usageText && providerPriced > 0 && exact > 0) warnings.push(`${providerPriced} row${providerPriced === 1 ? '' : 's'} kept Anthropic's rounded dollars (no matching usage, no public price, or a non-token charge).`)
   const unread = { cost: unreadColumns(cost.header, COST_COLUMNS), ...(u ? { usage: unreadColumns(u.header, USAGE_COLUMNS) } : {}) }
-  for (const w of [unreadableWarning(unreadable, unreadableExample), unreadWarning('Cost export', unread.cost), unreadWarning('Usage export', unread.usage ?? [])]) if (w) warnings.push(w)
+  for (const w of [badDateWarning(badDates, badDateExample, badDateUsd), unreadableWarning(unreadable, unreadableExample), unreadWarning('Cost export', unread.cost), unreadWarning('Usage export', unread.usage ?? [])]) if (w) warnings.push(w)
 
   return {
     csv: writeCsv([...FOCUS_14_COLUMNS, ...EXTRA_COLUMNS], out),
@@ -187,7 +199,7 @@ export function convertAnthropic(costText: string, usageText: string | null, pri
     quantityRows: exact + derived,
     providerPricedRows: providerPriced,
     unpricedModels: [...unpriced],
-    unreadableRows: unreadable,
+    unreadableRows: unreadable + badDates,
     unreadColumns: unread,
     warnings,
   }
