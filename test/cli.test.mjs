@@ -118,6 +118,13 @@ test('unreadable dates: the row is left out, its dollars stay in the provider to
   const [ap, af] = total(a.stderr)
   assert.ok(Math.abs(ap - af - 0.25) < 0.005, a.stderr)
 
+  // OpenAI: an impossible calendar date must not roll over into another day.
+  const oRoll = join(out, 'openai-rollover-date.csv')
+  writeFileSync(oRoll, o.map((l, i) => (i === 1 ? l.replace(/^\d+,\d+,[^,]+,/, 'x,y,2026-02-30T00:00:00+00:00,') : l)).join('\n'))
+  const a2 = run('convert', oRoll, '--offline')
+  assert.equal(a2.status, 1, a2.stderr)
+  assert.match(a2.stderr, /1 row was left out because the date couldn't be read \(for example "2026-02-30T00:00:00\+00:00"\)/)
+
   // Anthropic: an empty date on a paid row, and a US-format date that should still convert.
   const n = readFileSync(fx('anthropic-cost.csv'), 'utf8').trim().split(/\r?\n/)
   const nBad = join(out, 'anthropic-bad-date.csv')

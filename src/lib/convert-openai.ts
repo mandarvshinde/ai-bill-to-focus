@@ -98,11 +98,18 @@ const dayOf = (iso: string) => iso.slice(0, 10)
 const baseModel = (m: string) => m.replace(/-\d{4}-\d{2}-\d{2}$/, '')
 
 // ISO text only: JavaScript's Date parser accepts almost anything ("week 40"
-// is a date to it), which would turn a changed format into wrong dates.
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}([T ][\d:.]+)?(Z|[+-]\d{2}:?\d{2})?$/
+// is a date to it), which would turn a changed format into wrong dates. It also
+// rolls impossible dates over (2026-02-30 becomes March 2), so the calendar
+// fields are checked by hand before parsing.
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?(Z|[+-]\d{2}:?\d{2})?$/
 const isoDate = (v: string | null) => {
-  if (!v || !ISO_DATE.test(v.trim())) return null
-  const d = new Date(v.trim().replace(' ', 'T'))
+  const m = v ? ISO_DATE.exec(v.trim()) : null
+  if (!m) return null
+  const [, y, mo, da, h = '0', mi = '0', s = '0'] = m
+  const day = new Date(Date.UTC(+y, +mo - 1, +da))
+  if (day.getUTCMonth() !== +mo - 1 || day.getUTCDate() !== +da) return null
+  if (+h > 23 || +mi > 59 || +s > 59) return null
+  const d = new Date(v!.trim().replace(' ', 'T'))
   return Number.isNaN(d.getTime()) ? null : d
 }
 
