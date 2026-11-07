@@ -18,10 +18,10 @@
   "homepage": "https://www.cognocient.com/tools/focus-checker",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mandarvshinde/ai-bill-to-focus.git"
+    "url": "git+https://github.com/cognocient-ai/ai-bill-to-focus.git"
   },
   "bugs": {
-    "url": "https://github.com/mandarvshinde/ai-bill-to-focus/issues"
+    "url": "https://github.com/cognocient-ai/ai-bill-to-focus/issues"
   },
   "license": "MIT",
   "author": "Cognocient",
