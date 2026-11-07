@@ -55,7 +55,7 @@ npx ai-bill-to-focus report claude_api_cost_2026_10_01_to_2026_10_30.csv claude_
 
 `report` converts in memory and prints a summary that is safe to paste into a public issue: each file's column names, row count and date range, the public model names, how each line item was read, the reconciliation gap as a percentage, and the FOCUS check counts. It contains no dollar amounts and no account, project, workspace or API key names; fine-tuned model names are cut to their base model, and file names are replaced by "file 1", "file 2". Read it before you paste it. The web tool has the same report behind **Copy a report to share**.
 
-If you have an OpenAI or Together AI export, a report from it is the most useful thing you can [open an issue](https://github.com/mandarvshinde/ai-bill-to-focus/issues) with.
+If you have an OpenAI or Together AI export, a report from it is the most useful thing you can [open an issue](https://github.com/cognocient-ai/ai-bill-to-focus/issues) with.
 
 ## When an export format changes
 
